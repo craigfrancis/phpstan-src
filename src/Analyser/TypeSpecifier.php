@@ -175,7 +175,7 @@ class TypeSpecifier
 				$exprNode = $expressions[0];
 				/** @var ConstantScalarType $constantType */
 				$constantType = $expressions[1];
-				if ($constantType->getValue() === false) {
+				if (!$context->null() && $constantType->getValue() === false) {
 					$types = $this->create($exprNode, $constantType, $context, false, $scope, $rootExpr);
 					return $types->unionWith($this->specifyTypesInCondition(
 						$scope,
@@ -185,7 +185,7 @@ class TypeSpecifier
 					));
 				}
 
-				if ($constantType->getValue() === true) {
+				if (!$context->null() && $constantType->getValue() === true) {
 					$types = $this->create($exprNode, $constantType, $context, false, $scope, $rootExpr);
 					return $types->unionWith($this->specifyTypesInCondition(
 						$scope,
@@ -235,11 +235,32 @@ class TypeSpecifier
 							$newContext = $newContext->negate();
 						}
 						$argType = $scope->getType($exprNode->getArgs()[0]->value);
-						if ($argType instanceof StringType) {
+						if ($argType->isString()->yes()) {
 							$funcTypes = $this->create($exprNode, $constantType, $context, false, $scope, $rootExpr);
 							$valueTypes = $this->create($exprNode->getArgs()[0]->value, new AccessoryNonEmptyStringType(), $newContext, false, $scope, $rootExpr);
 							return $funcTypes->unionWith($valueTypes);
 						}
+					}
+				}
+
+				if (
+					$exprNode instanceof FuncCall
+					&& $exprNode->name instanceof Name
+					&& strtolower($exprNode->name->toString()) === 'substr'
+					&& isset($exprNode->getArgs()[0])
+					&& $constantType instanceof ConstantStringType
+					&& $constantType->getValue() !== ''
+				) {
+					$argType = $scope->getType($exprNode->getArgs()[0]->value);
+
+					if ($argType->isString()->yes()) {
+						return $this->create(
+							$exprNode->getArgs()[0]->value,
+							TypeCombinator::intersect($argType, new AccessoryNonEmptyStringType()),
+							$context,
+							false,
+							$scope,
+						);
 					}
 				}
 			}
@@ -339,7 +360,7 @@ class TypeSpecifier
 				$exprNode = $expressions[0];
 				/** @var ConstantScalarType $constantType */
 				$constantType = $expressions[1];
-				if ($constantType->getValue() === false || $constantType->getValue() === null) {
+				if (!$context->null() && ($constantType->getValue() === false || $constantType->getValue() === null)) {
 					return $this->specifyTypesInCondition(
 						$scope,
 						$exprNode,
@@ -348,7 +369,7 @@ class TypeSpecifier
 					);
 				}
 
-				if ($constantType->getValue() === true) {
+				if (!$context->null() && $constantType->getValue() === true) {
 					return $this->specifyTypesInCondition(
 						$scope,
 						$exprNode,
@@ -535,7 +556,7 @@ class TypeSpecifier
 					|| ($context->falsey() && (new ConstantIntegerType(1 - $offset))->isSuperTypeOf($leftType)->yes())
 				) {
 					$argType = $scope->getType($expr->right->getArgs()[0]->value);
-					if ($argType instanceof StringType) {
+					if ($argType->isString()->yes()) {
 						$result = $result->unionWith($this->create($expr->right->getArgs()[0]->value, new AccessoryNonEmptyStringType(), $context, false, $scope, $rootExpr));
 					}
 				}
@@ -962,10 +983,11 @@ class TypeSpecifier
 					$holders[$exprString] = [];
 				}
 
-				$holders[$exprString][] = new ConditionalExpressionHolder(
+				$holder = new ConditionalExpressionHolder(
 					$conditionExpressionTypes,
 					new VariableTypeHolder(TypeCombinator::remove($scope->getType($expr), $type), TrinaryLogic::createYes()),
 				);
+				$holders[$exprString][$holder->getKey()] = $holder;
 			}
 
 			return $holders;

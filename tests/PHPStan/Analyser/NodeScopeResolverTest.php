@@ -17,6 +17,11 @@ class NodeScopeResolverTest extends TypeInferenceTestCase
 		require_once __DIR__ . '/data/implode.php';
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/implode.php');
 
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/json-decode/narrow_type.php');
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/json-decode/narrow_type_with_force_array.php');
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/json-decode/invalid_type.php');
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/json-decode/json_object_as_array.php');
+
 		require_once __DIR__ . '/data/bug2574.php';
 
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/bug2574.php');
@@ -430,6 +435,7 @@ class NodeScopeResolverTest extends TypeInferenceTestCase
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/bug-2906.php');
 
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/DateTimeDynamicReturnTypes.php');
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/DateTimeModifyReturnTypes.php');
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/bug-4821.php');
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/bug-4838.php');
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/bug-4879.php');
@@ -634,6 +640,7 @@ class NodeScopeResolverTest extends TypeInferenceTestCase
 		if (PHP_VERSION_ID >= 80100) {
 			yield from $this->gatherAssertTypes(__DIR__ . '/data/enums.php');
 			yield from $this->gatherAssertTypes(__DIR__ . '/data/enums-import-alias.php');
+			yield from $this->gatherAssertTypes(__DIR__ . '/data/bug-7176.php');
 		}
 
 		if (PHP_VERSION_ID >= 80000) {
@@ -903,6 +910,9 @@ class NodeScopeResolverTest extends TypeInferenceTestCase
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/bug-7115.php');
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/constant-array-type-identical.php');
 		yield from $this->gatherAssertTypes(__DIR__ . '/data/non-empty-string-str-containing-fns.php');
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/bug-6609.php');
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/non-empty-string-substr-specifying.php');
+		yield from $this->gatherAssertTypes(__DIR__ . '/data/unset-conditional-expressions.php');
 	}
 
 	/**

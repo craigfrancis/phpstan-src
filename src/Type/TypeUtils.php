@@ -7,6 +7,8 @@ use PHPStan\Type\Accessory\HasPropertyType;
 use PHPStan\Type\Constant\ConstantArrayType;
 use PHPStan\Type\Constant\ConstantIntegerType;
 use PHPStan\Type\Constant\ConstantStringType;
+use PHPStan\Type\Enum\EnumCaseObjectType;
+use PHPStan\Type\Generic\TemplateType;
 use function array_merge;
 
 /** @api */
@@ -170,6 +172,14 @@ class TypeUtils
 	public static function getConstantScalars(Type $type): array
 	{
 		return self::map(ConstantScalarType::class, $type, false);
+	}
+
+	/**
+	 * @return EnumCaseObjectType[]
+	 */
+	public static function getEnumCaseObjects(Type $type): array
+	{
+		return self::map(EnumCaseObjectType::class, $type, false);
 	}
 
 	/**
@@ -337,14 +347,30 @@ class TypeUtils
 		return false;
 	}
 
-	public static function flattenConditionals(Type $type): Type
+	public static function containsTemplateType(Type $type): bool
 	{
-		return TypeTraverser::map($type, static function (Type $type, callable $traverse) {
-			while ($type instanceof ConditionalType || $type instanceof ConditionalTypeForParameter) {
-				$type = $type->getResult();
+		$containsTemplateType = false;
+		TypeTraverser::map($type, static function (Type $type, callable $traverse) use (&$containsTemplateType): Type {
+			if ($type instanceof TemplateType) {
+				$containsTemplateType = true;
 			}
 
-			return $traverse($type);
+			return $containsTemplateType ? $type : $traverse($type);
+		});
+
+		return $containsTemplateType;
+	}
+
+	public static function resolveLateResolvableTypes(Type $type, bool $resolveUnresolvableTypes = true): Type
+	{
+		return TypeTraverser::map($type, static function (Type $type, callable $traverse) use ($resolveUnresolvableTypes): Type {
+			$type = $traverse($type);
+
+			if ($type instanceof LateResolvableType && ($resolveUnresolvableTypes || $type->isResolvable())) {
+				$type = $type->resolve();
+			}
+
+			return $type;
 		});
 	}
 

@@ -4,6 +4,7 @@ namespace PHPStan\Analyser;
 
 use ArrayAccess;
 use Closure;
+use DivisionByZeroError;
 use PhpParser\Comment\Doc;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
@@ -116,6 +117,7 @@ use PHPStan\Type\ClosureType;
 use PHPStan\Type\Constant\ConstantArrayType;
 use PHPStan\Type\Constant\ConstantArrayTypeBuilder;
 use PHPStan\Type\Constant\ConstantBooleanType;
+use PHPStan\Type\Constant\ConstantIntegerType;
 use PHPStan\Type\Constant\ConstantStringType;
 use PHPStan\Type\ErrorType;
 use PHPStan\Type\FileTypeMapper;
@@ -1745,6 +1747,12 @@ class NodeScopeResolver
 			$scope = $result->getScope();
 			$hasYield = $result->hasYield();
 			$throwPoints = $result->getThrowPoints();
+			if (
+				($expr instanceof Expr\AssignOp\Div || $expr instanceof Expr\AssignOp\Mod) &&
+				!$scope->getType($expr->expr)->toNumber()->isSuperTypeOf(new ConstantIntegerType(0))->no()
+			) {
+				$throwPoints[] = ThrowPoint::createExplicit($scope, new ObjectType(DivisionByZeroError::class), $expr, false);
+			}
 		} elseif ($expr instanceof FuncCall) {
 			$parametersAcceptor = null;
 			$functionReflection = null;
@@ -2310,6 +2318,12 @@ class NodeScopeResolver
 			$hasYield = $result->hasYield();
 			$throwPoints = $result->getThrowPoints();
 			$result = $this->processExprNode($expr->right, $scope, $nodeCallback, $context->enterDeep());
+			if (
+				($expr instanceof BinaryOp\Div || $expr instanceof BinaryOp\Mod) &&
+				!$scope->getType($expr->right)->toNumber()->isSuperTypeOf(new ConstantIntegerType(0))->no()
+			) {
+				$throwPoints[] = ThrowPoint::createExplicit($scope, new ObjectType(DivisionByZeroError::class), $expr, false);
+			}
 			$scope = $result->getScope();
 			$hasYield = $hasYield || $result->hasYield();
 			$throwPoints = array_merge($throwPoints, $result->getThrowPoints());
@@ -3490,11 +3504,12 @@ class NodeScopeResolver
 				$conditionalExpressions[$exprString] = [];
 			}
 
-			$conditionalExpressions[$exprString][] = new ConditionalExpressionHolder([
+			$holder = new ConditionalExpressionHolder([
 				'$' . $variableName => $variableType,
 			], VariableTypeHolder::createYes(
 				TypeCombinator::intersect($scope->getType($expr), $exprType),
 			));
+			$conditionalExpressions[$exprString][$holder->getKey()] = $holder;
 		}
 
 		return $conditionalExpressions;
@@ -3518,11 +3533,12 @@ class NodeScopeResolver
 				$conditionalExpressions[$exprString] = [];
 			}
 
-			$conditionalExpressions[$exprString][] = new ConditionalExpressionHolder([
+			$holder = new ConditionalExpressionHolder([
 				'$' . $variableName => $variableType,
 			], VariableTypeHolder::createYes(
 				TypeCombinator::remove($scope->getType($expr), $exprType),
 			));
+			$conditionalExpressions[$exprString][$holder->getKey()] = $holder;
 		}
 
 		return $conditionalExpressions;
@@ -3689,9 +3705,10 @@ class NodeScopeResolver
 			$conditionalHolders = [];
 			foreach ($iterateeType->getKeyTypes() as $i => $keyType) {
 				$valueType = $iterateeType->getValueTypes()[$i];
-				$conditionalHolders[] = new ConditionalExpressionHolder([
+				$holder = new ConditionalExpressionHolder([
 					'$' . $stmt->keyVar->name => $keyType,
 				], new VariableTypeHolder($valueType, TrinaryLogic::createYes()));
+				$conditionalHolders[$holder->getKey()] = $holder;
 			}
 
 			$scope = $scope->addConditionalExpressions(
@@ -3708,8 +3725,20 @@ class NodeScopeResolver
 	 */
 	private function processTraitUse(Node\Stmt\TraitUse $node, MutatingScope $classScope, callable $nodeCallback): void
 	{
+		$parentTraitNames = [];
+		$parent = $classScope->getParentScope();
+		while ($parent !== null) {
+			if ($parent->isInTrait()) {
+				$parentTraitNames[] = $parent->getTraitReflection()->getName();
+			}
+			$parent = $parent->getParentScope();
+		}
+
 		foreach ($node->traits as $trait) {
 			$traitName = (string) $trait;
+			if (in_array($traitName, $parentTraitNames, true)) {
+				continue;
+			}
 			if (!$this->reflectionProvider->hasClass($traitName)) {
 				continue;
 			}

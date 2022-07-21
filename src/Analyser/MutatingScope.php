@@ -90,7 +90,6 @@ use PHPStan\Type\GenericTypeVariableResolver;
 use PHPStan\Type\IntegerRangeType;
 use PHPStan\Type\IntegerType;
 use PHPStan\Type\IntersectionType;
-use PHPStan\Type\LateResolvableType;
 use PHPStan\Type\MixedType;
 use PHPStan\Type\NeverType;
 use PHPStan\Type\NonexistentParentClassType;
@@ -575,7 +574,7 @@ class MutatingScope implements Scope
 		$key = $this->getNodeKey($node);
 
 		if (!array_key_exists($key, $this->resolvedTypes)) {
-			$this->resolvedTypes[$key] = $this->resolveLateResolvableTypes($this->resolveType($node));
+			$this->resolvedTypes[$key] = TypeUtils::resolveLateResolvableTypes($this->resolveType($node));
 		}
 		return $this->resolvedTypes[$key];
 	}
@@ -688,8 +687,17 @@ class MutatingScope implements Scope
 				if ($type instanceof ConstantStringType) {
 					return new ConstantStringType(~$type->getValue());
 				}
-				if ($type instanceof StringType) {
-					return new StringType();
+				if ($type->isString()->yes()) {
+					$accessories = [
+						new StringType(),
+					];
+					if ($type->isNonEmptyString()->yes()) {
+						$accessories[] = new AccessoryNonEmptyStringType();
+					}
+					// it is not useful to apply numeric and literal strings here.
+					// numeric string isn't certainly kept numeric: 3v4l.org/JERDB
+
+					return TypeCombinator::intersect(...$accessories);
 				}
 				if ($type instanceof IntegerType || $type instanceof FloatType) {
 					return new IntegerType(); //no const types here, result depends on PHP_INT_SIZE
@@ -2940,11 +2948,18 @@ class MutatingScope implements Scope
 		}
 
 		if ($node instanceof Node\Expr\BinaryOp\Div || $node instanceof Node\Expr\AssignOp\Div) {
+			if ($rightNumberValue === 0 || $rightNumberValue === 0.0) {
+				return new ErrorType();
+			}
 			return $this->getTypeFromValue($leftNumberValue / $rightNumberValue);
 		}
 
 		if ($node instanceof Node\Expr\BinaryOp\Mod || $node instanceof Node\Expr\AssignOp\Mod) {
-			return $this->getTypeFromValue(((int) $leftNumberValue) % ((int) $rightNumberValue));
+			$rightIntegerValue = (int) $rightNumberValue;
+			if ($rightIntegerValue === 0) {
+				return new ErrorType();
+			}
+			return $this->getTypeFromValue(((int) $leftNumberValue) % $rightIntegerValue);
 		}
 
 		if ($node instanceof Expr\BinaryOp\ShiftLeft || $node instanceof Expr\AssignOp\ShiftLeft) {
@@ -3170,6 +3185,17 @@ class MutatingScope implements Scope
 			[
 				'this' => VariableTypeHolder::createYes(new ThisType($classReflection)),
 			],
+			[],
+			[],
+			null,
+			null,
+			true,
+			[],
+			[],
+			[],
+			[],
+			false,
+			$classReflection->isAnonymous() ? $this : null,
 		);
 	}
 
@@ -4144,6 +4170,23 @@ class MutatingScope implements Scope
 			$exprString = sprintf('$%s', $variableName);
 			$nativeTypes[$exprString] = $nativeType;
 
+			$conditionalExpressions = [];
+			foreach ($this->conditionalExpressions as $conditionalExprString => $holders) {
+				if ($conditionalExprString === $exprString) {
+					continue;
+				}
+
+				foreach ($holders as $holder) {
+					foreach (array_keys($holder->getConditionExpressionTypes()) as $conditionExprString2) {
+						if ($conditionExprString2 === $exprString) {
+							continue 3;
+						}
+					}
+				}
+
+				$conditionalExpressions[$conditionalExprString] = $holders;
+			}
+
 			return $this->scopeFactory->create(
 				$this->context,
 				$this->isDeclareStrictTypes(),
@@ -4152,7 +4195,7 @@ class MutatingScope implements Scope
 				$this->getNamespace(),
 				$variableTypes,
 				$this->moreSpecificTypes,
-				$this->conditionalExpressions,
+				$conditionalExpressions,
 				$this->inClosureBindScopeClass,
 				$this->anonymousFunctionReflection,
 				$this->inFirstLevelStatement,
@@ -4494,7 +4537,7 @@ class MutatingScope implements Scope
 					}
 
 					if (!$typeGuards[$conditionExprString]->equals($conditionalType)) {
-						continue 2;
+						continue;
 					}
 
 					$matchingConditions[$conditionExprString] = $conditionalType;
@@ -6016,19 +6059,6 @@ class MutatingScope implements Scope
 		}
 
 		return IntegerRangeType::fromInterval($min, $max);
-	}
-
-	private function resolveLateResolvableTypes(Type $type): Type
-	{
-		return TypeTraverser::map($type, static function (Type $type, callable $traverse): Type {
-			$type = $traverse($type);
-
-			if ($type instanceof LateResolvableType) {
-				$type = $type->resolve();
-			}
-
-			return $type;
-		});
 	}
 
 }
